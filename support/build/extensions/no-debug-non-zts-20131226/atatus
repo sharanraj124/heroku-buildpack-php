@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# Build Path: /app/.heroku/php/
+
+# fail hard
+set -o pipefail
+# fail harder
+set -eu
+
+source $(dirname $BASH_SOURCE)/../../_util/include/manifest.sh
+
+OUT_PREFIX=$1
+
+ZEND_MODULE_API_VERSION=$(basename $(dirname $0))
+ZEND_MODULE_API_VERSION=${ZEND_MODULE_API_VERSION#no-debug-non-zts-}
+
+dep_formula=${0#$WORKSPACE_DIR/}
+dep_name=$(basename $BASH_SOURCE)
+dep_version=${dep_formula##*"/${dep_name}-"}
+dep_package=ext-${dep_name}-${dep_version}
+dep_dirname=atatus-php-${dep_version}-x64-debian
+dep_archive_name=${dep_dirname}.tar.gz
+dep_url=https://s3.amazonaws.com/atatus-artifacts/atatus-php/downloads/${dep_archive_name}
+case ${ZEND_MODULE_API_VERSION} in
+    20121212)
+        series=5.5
+        ;;
+    20131226)
+        series=5.6
+        ;;
+    20151012)
+        series=7.0
+        ;;
+    20160303)
+        series=7.1
+        ;;
+    20170718)
+        series=7.2
+        ;;
+    20180731)
+        series=7.3
+        ;;
+    20190902)
+        series=7.4
+        ;;
+    20200930)
+        series=8.0
+        ;;
+esac
+dep_manifest=${dep_package}_php-$series.composer.json
+
+echo "-----> Packaging ${dep_package}..."
+echo "pwdf:" $(pwd)
+
+curl -L ${dep_url} | tar xz
+echo "pwdf:" $(pwd)
+pushd ${dep_dirname}
+ext_dir=${OUT_PREFIX}/lib/php/extensions/no-debug-non-zts-${ZEND_MODULE_API_VERSION}
+bin_dir=${OUT_PREFIX}/bin
+echo "test start"
+echo $ext_dir
+echo "test start1"
+echo $bin_dir
+echo "test start2"
+echo $OUT_PREFIX
+mkdir -p ${ext_dir}
+mkdir -p ${bin_dir}
+cp usr/lib/atatus-php/x86_64/atatus_php_${series}.so ${ext_dir}/atatus.so
+cp usr/bin/atatus-php-collector ${bin_dir}/atatus-php-collector
+find ${OUT_PREFIX} -type f \( -executable -o -name '*.a' \) -exec sh -c "file -i '{}' | grep -Eq 'application/x-(archive|executable|sharedlib); charset=binary'" \; -print | xargs strip --strip-unneeded
+popd
+
+mkdir -p ${OUT_PREFIX}/bin
+# gets sourced on dyno boot
+cat > ${OUT_PREFIX}/bin/profile.atatus.sh <<'EOF'
+if [[ -n "$ATATUS_LICENSE_KEY" ]]; then
+    if [[ -f "/app/.heroku/php/bin/atatus-php-collector" ]]; then
+        export ATATUS_APP_NAME=${ATATUS_APP_NAME:-${HEROKU_APP_NAME:-"Heroku PHP App"}}
+        export ATATUS_LOG_LEVEL=${ATATUS_LOG_LEVEL:-"warning"}
+        export ATATUS_COLLECTOR_LOG_LEVEL="$ATATUS_LOG_LEVEL"
+
+        # if [[ "$ATATUS_LOG_LEVEL" == verbose* ]]; then
+        #   ATATUS_LOG_LEVEL="debug"
+        # fi
+
+        # The collector is a started in foreground mode so it will not daemonize
+        # (i.e. disassociate from the controlling TTY and disappear into the
+        # background).
+        #
+        # Perpetually tail and redirect the collector log and agent log file to stderr
+        # so that it may be observed via 'heroku logs'.
+        touch /tmp/heroku.ext-atatus.collector.${PORT}.log
+        tail -qF -n 0 /tmp/heroku.ext-atatus.collector.${PORT}.log 1>&2 &
+
+        touch /tmp/heroku.ext-atatus.agent.${PORT}.log
+        tail -qF -n 0 /tmp/heroku.ext-atatus.agent.${PORT}.log 1>&2 &
+
+        # collector start
+        /app/.heroku/php/bin/atatus-php-collector --conn /tmp/.atatus.sock --log-file "/tmp/heroku.ext-atatus.collector.${PORT}.log" --log-level "${ATATUS_COLLECTOR_LOG_LEVEL}" --pidfile "/tmp/atatus-php-collector.pid" &
+
+        # give it a moment to connect
+        sleep 2
+    else
+        echo >&2 "WARNING: Atatus license key is set, but PHP extension not yet installed. Add "ext-atatus" inside the require field of "compose.json", do the "composer update" and push an update to the application to finish installation;"
+    fi
+else
+    echo >&2 "WARNING: Atatus license key is not set. Please set using heroku config:set ATATUS_LICENSE_KEY=lic_apm_********"
+
+    touch /tmp/heroku.ext-atatus.collector.${PORT}.log
+    tail -qF -n 0 /tmp/heroku.ext-atatus.collector.${PORT}.log 1>&2 &
+
+    touch /tmp/heroku.ext-atatus.agent.${PORT}.log
+    tail -qF -n 0 /tmp/heroku.ext-atatus.agent.${PORT}.log 1>&2 &
+fi
+EOF
+mkdir -p ${OUT_PREFIX}/etc/php/conf.d
+cat > ${OUT_PREFIX}/etc/php/conf.d/atatus.ini <<'EOF'
+extension="atatus.so"
+
+atatus.enabled = true
+atatus.license_key = ${ATATUS_LICENSE_KEY}
+atatus.app_name = ${ATATUS_APP_NAME}
+
+atatus.collector.notify_ssl = true
+atatus.collector.notify_host = "apm-rx.atatus.com"
+atatus.collector.pidfile = /tmp/atatus-php-collector.pid
+
+atatus.collector.path = "/app/.heroku/php/bin/atatus-php-collector"
+atatus.collector.connection = "/tmp/.atatus.sock"
+
+atatus.agent.log_level = ${ATATUS_LOG_LEVEL}
+atatus.collector.log_level = ${ATATUS_COLLECTOR_LOG_LEVEL}
+
+atatus.agent.log_file = /tmp/heroku.ext-atatus.agent.${PORT}.log
+atatus.collector.log_file = /tmp/heroku.ext-atatus.collector.${PORT}.log
+
+atatus.trace.enabled = true
+atatus.trace.response_time = 2000
+atatus.sql.capture = "normalized"
+atatus.laravel.enable_queues = true
+
+EOF
+
+MANIFEST_REQUIRE="${MANIFEST_REQUIRE:-"{\"heroku-sys/php\":\"${series}.*\"}"}"
+MANIFEST_CONFLICT="${MANIFEST_CONFLICT:-"{\"heroku-sys/hhvm\":\"*\"}"}"
+MANIFEST_REPLACE="${MANIFEST_REPLACE:-"{}"}"
+MANIFEST_PROVIDE="${MANIFEST_PROVIDE:-"{}"}"
+MANIFEST_EXTRA="${MANIFEST_EXTRA:-"{\"config\":\"etc/php/conf.d/atatus.ini\",\"profile\":\"bin/profile.atatus.sh\"}"}"
+
+python $(dirname $BASH_SOURCE)/../../_util/include/manifest.py "heroku-sys-php-extension" "heroku-sys/ext-${dep_name}" "$dep_version" "${dep_formula}.tar.gz" "$MANIFEST_REQUIRE" "$MANIFEST_CONFLICT" "$MANIFEST_REPLACE" "$MANIFEST_PROVIDE" "$MANIFEST_EXTRA" > $dep_manifest
+
+print_or_export_manifest_cmd "$(generate_manifest_cmd "$dep_manifest")"
