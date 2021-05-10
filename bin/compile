@@ -44,6 +44,7 @@ rm $bp_dir/bin/util/stdlib.sh
 source $bp_dir/bin/util/failures.sh
 
 # for extensions that need special treatment
+source $bp_dir/bin/util/atatus.sh
 source $bp_dir/bin/util/newrelic.sh
 source $bp_dir/bin/util/blackfire.sh
 
