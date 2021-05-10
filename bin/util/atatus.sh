@@ -25,16 +25,16 @@ install_atatus_ext() {
     fi
 }
 
-install_newrelic_userini() {
-    if [[ -n "${NEW_RELIC_CONFIG_FILE:-}" ]]; then
-        if [[ ! -f "${NEW_RELIC_CONFIG_FILE}" ]]; then
-            mcount "failures.addons.newrelic.NEW_RELIC_CONFIG_FILE"
-            error <<-EOF
-                Config var 'NEW_RELIC_CONFIG_FILE' points to non existing file
-                '${NEW_RELIC_CONFIG_FILE}'
-            EOF
-        fi
-        notice_inline "Using custom New Relic config '${NEW_RELIC_CONFIG_FILE}'"
-        ( cd $build_dir/.heroku/php/etc/php/conf.d; ln -s "../../../../../${NEW_RELIC_CONFIG_FILE}" "ext-atatus.user.ini" )
-    fi
-}
+# install_newrelic_userini() {
+#     if [[ -n "${NEW_RELIC_CONFIG_FILE:-}" ]]; then
+#         if [[ ! -f "${NEW_RELIC_CONFIG_FILE}" ]]; then
+#             mcount "failures.addons.newrelic.NEW_RELIC_CONFIG_FILE"
+#             error <<-EOF
+#                 Config var 'NEW_RELIC_CONFIG_FILE' points to non existing file
+#                 '${NEW_RELIC_CONFIG_FILE}'
+#             EOF
+#         fi
+#         notice_inline "Using custom New Relic config '${NEW_RELIC_CONFIG_FILE}'"
+#         ( cd $build_dir/.heroku/php/etc/php/conf.d; ln -s "../../../../../${NEW_RELIC_CONFIG_FILE}" "ext-atatus.user.ini" )
+#     fi
+# }
