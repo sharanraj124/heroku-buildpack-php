@@ -723,9 +723,10 @@ export COMPOSER=composer.json
 if [[ "${HEROKU_PHP_INSTALL_DEV+CI}" != "CI" ]]; then
 	status "Checking for additional extensions to install..."
 	# special treatment for Blackfire; we enable it if we detect a server id and a server token for it
+	install_atatus_ext
 	install_blackfire_ext
 	# special treatment for New Relic; we enable it if we detect a license key for it
-	install_atatus_ext
+
 	install_newrelic_ext
 	install_newrelic_userini
 fi
